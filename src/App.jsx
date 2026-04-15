@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   AlertTriangle,
@@ -8,6 +8,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   Droplets,
   FileSpreadsheet,
   Flame,
@@ -76,9 +77,11 @@ const GUEST_DAY_RECORDS_KEY = 'fittrack:guest:day-records';
 const GUEST_PROFILE_KEY = 'fittrack:guest:profile';
 const GUEST_GOALS_KEY = 'fittrack:guest:goals';
 const GUEST_INSIGHTS_KEY = 'fittrack:guest:insights';
+const GUEST_ENTRY_SOURCES_KEY = 'fittrack:guest:entry-sources';
 
 const getUserDayRegistryKey = (userId) => `fittrack:user:${userId}:day-registry`;
 const getUserInsightsKey = (userId) => `fittrack:user:${userId}:insights`;
+const getUserEntrySourcesKey = (userId) => `fittrack:user:${userId}:entry-sources`;
 
 function readStoredJson(key, fallbackValue) {
   try {
@@ -98,6 +101,14 @@ function writeStoredJson(key, value) {
   }
 }
 
+function removeStoredKey(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch (error) {
+    console.error('Storage remove error:', error);
+  }
+}
+
 function hydrateLocalDayRecords(rawRecords = {}) {
   const hydrated = {};
 
@@ -113,6 +124,7 @@ function hydrateLocalDayRecords(rawRecords = {}) {
           carbs: Number(entry.carbs) || 0,
           fats: Number(entry.fats) || 0,
           timestamp: entry.timestamp || new Date().toISOString(),
+          source: entry.source || null,
         }))
       : [];
 
@@ -136,6 +148,50 @@ function parseCsvText(text) {
       error: (error) => reject(error),
     });
   });
+}
+
+function applyEntrySourcesToDayRecords(dayRecords, sourceMap = {}) {
+  const nextRecords = {};
+
+  Object.entries(dayRecords || {}).forEach(([dateKey, record]) => {
+    nextRecords[dateKey] = createDayRecord(dateKey, {
+      ...record,
+      entries: (record.entries || []).map((entry) => ({
+        ...entry,
+        source: sourceMap[entry.id] || entry.source || 'logged',
+      })),
+    });
+  });
+
+  return nextRecords;
+}
+
+function buildEntrySourceMap(entries = [], source) {
+  return entries.reduce((accumulator, entry) => {
+    accumulator[entry.id] = source;
+    return accumulator;
+  }, {});
+}
+
+function flattenEntriesForExport(dayRecords) {
+  return listKnownDateKeys(dayRecords)
+    .slice()
+    .reverse()
+    .flatMap((dateKey) =>
+      getDayRecord(dayRecords, dateKey).entries
+        .slice()
+        .sort((left, right) => new Date(left.timestamp || 0).getTime() - new Date(right.timestamp || 0).getTime())
+        .map((entry) => ({
+          date: dateKey,
+          entry_name: entry.name,
+          calories: entry.calories,
+          protein: entry.protein,
+          carbs: entry.carbs,
+          fats: entry.fats,
+          source: entry.source || 'logged',
+          created_at: entry.timestamp || '',
+        }))
+    );
 }
 
 function ToastContainer({ toasts, removeToast }) {
@@ -302,7 +358,71 @@ function ImportMetric({ label, value, tone = 'default' }) {
   );
 }
 
+function ResetDataModal({ open, confirmationText, setConfirmationText, isResetting, onClose, onConfirm }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-5 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-red-100 bg-white p-7 shadow-2xl">
+        <div className="mb-4 flex items-start gap-3">
+          <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-red-500">
+            <AlertTriangle size={18} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">Reset all nutrition data?</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              This will permanently remove your tracked meals, daily history, imported records, and saved nutrition data
+              for this account. This action cannot be undone.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          Type <span className="font-bold">RESET</span> to confirm.
+        </div>
+
+        <div className="mt-4">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Confirmation</label>
+          <input
+            value={confirmationText}
+            onChange={(event) => setConfirmationText(event.target.value)}
+            placeholder="Type RESET"
+            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-red-400"
+          />
+        </div>
+
+        <div className="mt-6 flex gap-3">
+          <button
+            onClick={onClose}
+            disabled={isResetting}
+            className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isResetting || confirmationText.trim().toUpperCase() !== 'RESET'}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-500 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-red-600 disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            {isResetting ? (
+              <>
+                <Loader size={16} className="animate-spin" />
+                Resetting...
+              </>
+            ) : (
+              'Reset all data'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function FitnessTracker() {
+  const skipNextProfileSaveRef = useRef(false);
+  const skipNextGoalsSaveRef = useRef(false);
+
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -320,16 +440,20 @@ export default function FitnessTracker() {
   const [goals, setGoals] = useState(DEFAULT_GOALS);
   const [dailyData, setDailyData] = useState({});
   const [dailyInsights, setDailyInsights] = useState({});
+  const [entrySources, setEntrySources] = useState({});
 
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGeneratingGoals, setIsGeneratingGoals] = useState(false);
   const [isPreparingImport, setIsPreparingImport] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isResettingData, setIsResettingData] = useState(false);
   const [lastParsed, setLastParsed] = useState(null);
   const [importPreview, setImportPreview] = useState(null);
   const [importSummary, setImportSummary] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetConfirmationText, setResetConfirmationText] = useState('');
 
   const [toasts, setToasts] = useState([]);
 
@@ -338,6 +462,10 @@ export default function FitnessTracker() {
   const selectedEntries = selectedDay.entries;
   const totals = sumEntries(selectedEntries);
   const trackedDateKeys = listKnownDateKeys(dailyData);
+  const trackedEntryCount = trackedDateKeys.reduce(
+    (sum, dateKey) => sum + getDayRecord(dailyData, dateKey).entries.length,
+    0
+  );
   const hasTrackedDay = Boolean(dailyData[selectedDateKey]);
   const isToday = selectedDateKey === formatDateKey(new Date());
   const insightFingerprint = buildInsightFingerprint({ entries: selectedEntries, totals, goals });
@@ -360,9 +488,13 @@ export default function FitnessTracker() {
   }, []);
 
   const loadGuestState = useCallback(() => {
+    const storedSources = readStoredJson(GUEST_ENTRY_SOURCES_KEY, {});
+    const storedDayRecords = hydrateLocalDayRecords(readStoredJson(GUEST_DAY_RECORDS_KEY, {}));
+
     setProfile({ ...DEFAULT_PROFILE, ...readStoredJson(GUEST_PROFILE_KEY, DEFAULT_PROFILE) });
     setGoals({ ...DEFAULT_GOALS, ...readStoredJson(GUEST_GOALS_KEY, DEFAULT_GOALS) });
-    setDailyData(hydrateLocalDayRecords(readStoredJson(GUEST_DAY_RECORDS_KEY, {})));
+    setEntrySources(storedSources);
+    setDailyData(applyEntrySourcesToDayRecords(storedDayRecords, storedSources));
     setDailyInsights(readStoredJson(GUEST_INSIGHTS_KEY, {}));
   }, []);
 
@@ -379,7 +511,11 @@ export default function FitnessTracker() {
       if (entriesResult.error) throw entriesResult.error;
 
       const storedDates = readStoredJson(getUserDayRegistryKey(currentUser.id), []);
-      const organized = organizeEntriesByDay(entriesResult.data || [], storedDates);
+      const storedSources = readStoredJson(getUserEntrySourcesKey(currentUser.id), {});
+      const organized = applyEntrySourcesToDayRecords(
+        organizeEntriesByDay(entriesResult.data || [], storedDates),
+        storedSources
+      );
 
       setProfile({
         ...DEFAULT_PROFILE,
@@ -389,6 +525,7 @@ export default function FitnessTracker() {
         ...DEFAULT_GOALS,
         ...(goalsResult.data || {}),
       });
+      setEntrySources(storedSources);
       setDailyData(organized);
       setDailyInsights(readStoredJson(getUserInsightsKey(currentUser.id), {}));
     } catch (error) {
@@ -457,7 +594,8 @@ export default function FitnessTracker() {
     writeStoredJson(GUEST_PROFILE_KEY, profile);
     writeStoredJson(GUEST_GOALS_KEY, goals);
     writeStoredJson(GUEST_INSIGHTS_KEY, dailyInsights);
-  }, [dailyData, dailyInsights, goals, loading, profile, user]);
+    writeStoredJson(GUEST_ENTRY_SOURCES_KEY, entrySources);
+  }, [dailyData, dailyInsights, entrySources, goals, loading, profile, user]);
 
   useEffect(() => {
     if (loading || !user) return;
@@ -469,11 +607,13 @@ export default function FitnessTracker() {
 
     if (user) {
       writeStoredJson(getUserInsightsKey(user.id), dailyInsights);
+      writeStoredJson(getUserEntrySourcesKey(user.id), entrySources);
       return;
     }
 
     writeStoredJson(GUEST_INSIGHTS_KEY, dailyInsights);
-  }, [dailyInsights, loading, user]);
+    writeStoredJson(GUEST_ENTRY_SOURCES_KEY, entrySources);
+  }, [dailyInsights, entrySources, loading, user]);
 
   const saveProfile = useCallback(async () => {
     if (!user) return;
@@ -517,6 +657,10 @@ export default function FitnessTracker() {
 
   useEffect(() => {
     if (!user || !profile.height) return undefined;
+    if (skipNextProfileSaveRef.current) {
+      skipNextProfileSaveRef.current = false;
+      return undefined;
+    }
 
     const timeout = window.setTimeout(() => {
       saveProfile();
@@ -527,6 +671,10 @@ export default function FitnessTracker() {
 
   useEffect(() => {
     if (!user) return undefined;
+    if (skipNextGoalsSaveRef.current) {
+      skipNextGoalsSaveRef.current = false;
+      return undefined;
+    }
 
     const timeout = window.setTimeout(() => {
       saveGoals();
@@ -721,7 +869,10 @@ export default function FitnessTracker() {
         const { data, error } = await supabase.from('food_entries').insert(rowsToInsert).select();
         if (error) throw error;
 
-        newEntries = (data || []).map(mapEntryFromDatabase);
+        newEntries = (data || []).map((entry) => ({
+          ...mapEntryFromDatabase(entry),
+          source: 'ai_parsed',
+        }));
       } else {
         const timestamp = new Date().toISOString();
         newEntries = parsedItems.map((item, index) => ({
@@ -732,10 +883,12 @@ export default function FitnessTracker() {
           carbs: Number(item.carbs) || 0,
           fats: Number(item.fats) || 0,
           timestamp,
+          source: 'ai_parsed',
         }));
       }
 
       setDailyData((previous) => addEntriesToDay(previous, selectedDateKey, newEntries));
+      setEntrySources((previous) => ({ ...previous, ...buildEntrySourceMap(newEntries, 'ai_parsed') }));
 
       const totalCalories = parsedItems.reduce((sum, item) => sum + (Number(item.calories) || 0), 0);
       const totalProtein = parsedItems.reduce((sum, item) => sum + (Number(item.protein) || 0), 0);
@@ -768,6 +921,11 @@ export default function FitnessTracker() {
       const willBeEmpty = selectedEntries.length === 1;
 
       setDailyData((previous) => deleteEntryFromDay(previous, selectedDateKey, entry.id));
+      setEntrySources((previous) => {
+        const nextSources = { ...previous };
+        delete nextSources[entry.id];
+        return nextSources;
+      });
       setConfirmDeleteId(null);
 
       addToast(
@@ -912,7 +1070,10 @@ export default function FitnessTracker() {
 
           (data || []).forEach((row) => {
             if (!importedGroups[row.date]) importedGroups[row.date] = [];
-            importedGroups[row.date].push(mapEntryFromDatabase(row));
+            importedGroups[row.date].push({
+              ...mapEntryFromDatabase(row),
+              source: 'imported',
+            });
             importedCount += 1;
           });
         }
@@ -927,6 +1088,7 @@ export default function FitnessTracker() {
             carbs: item.entry.carbs,
             fats: item.entry.fats,
             timestamp: new Date().toISOString(),
+            source: 'imported',
           });
           importedCount += 1;
         });
@@ -940,6 +1102,15 @@ export default function FitnessTracker() {
         });
 
         return nextRecords;
+      });
+      setEntrySources((previous) => {
+        let nextSources = { ...previous };
+
+        Object.values(importedGroups).forEach((entries) => {
+          nextSources = { ...nextSources, ...buildEntrySourceMap(entries, 'imported') };
+        });
+
+        return nextSources;
       });
 
       setImportSummary({
@@ -985,6 +1156,104 @@ export default function FitnessTracker() {
   const clearImportPreview = () => {
     setImportPreview(null);
     setImportSummary(null);
+  };
+
+  const exportCsv = () => {
+    const exportRows = flattenEntriesForExport(dailyData);
+
+    if (!exportRows.length) {
+      addToast('There is no nutrition history to export yet.', 'info');
+      return;
+    }
+
+    const csv = Papa.unparse(exportRows, {
+      columns: ['date', 'entry_name', 'calories', 'protein', 'carbs', 'fats', 'source', 'created_at'],
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const exportDate = formatDateKey(new Date()) || 'today';
+
+    link.href = url;
+    link.setAttribute('download', `nutrition-log-${exportDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+
+    addToast(`Downloaded ${exportRows.length} nutrition rows.`, 'success');
+  };
+
+  const clearTrackingState = useCallback(() => {
+    setDailyData({});
+    setDailyInsights({});
+    setEntrySources({});
+    setGoals(DEFAULT_GOALS);
+    setProfile(DEFAULT_PROFILE);
+    setInputText('');
+    setLastParsed(null);
+    setImportPreview(null);
+    setImportSummary(null);
+    setConfirmDeleteId(null);
+    setCurrentDate(new Date());
+    setActiveTab('home');
+  }, []);
+
+  const closeResetModal = () => {
+    setShowResetModal(false);
+    setResetConfirmationText('');
+  };
+
+  const handleResetAllData = async () => {
+    if (resetConfirmationText.trim().toUpperCase() !== 'RESET') return;
+
+    setIsResettingData(true);
+
+    try {
+      skipNextProfileSaveRef.current = true;
+      skipNextGoalsSaveRef.current = true;
+
+      if (user) {
+        const [entriesResult, goalsResult, profileResult] = await Promise.all([
+          supabase.from('food_entries').delete().eq('user_id', user.id),
+          supabase.from('goals').delete().eq('user_id', user.id),
+          supabase
+            .from('profiles')
+            .update({
+              height: '',
+              weight: '',
+              goal: '',
+              workout_frequency: '',
+              additional_info: '',
+            })
+            .eq('id', user.id),
+        ]);
+
+        if (entriesResult.error) throw entriesResult.error;
+        if (goalsResult.error) throw goalsResult.error;
+        if (profileResult.error) throw profileResult.error;
+
+        removeStoredKey(getUserDayRegistryKey(user.id));
+        removeStoredKey(getUserInsightsKey(user.id));
+        removeStoredKey(getUserEntrySourcesKey(user.id));
+      } else {
+        removeStoredKey(GUEST_DAY_RECORDS_KEY);
+        removeStoredKey(GUEST_PROFILE_KEY);
+        removeStoredKey(GUEST_GOALS_KEY);
+        removeStoredKey(GUEST_INSIGHTS_KEY);
+        removeStoredKey(GUEST_ENTRY_SOURCES_KEY);
+      }
+
+      clearTrackingState();
+      closeResetModal();
+      addToast('All nutrition tracking data has been reset.', 'success', 5000);
+    } catch (error) {
+      console.error('Reset data error:', error);
+      addToast('Unable to reset data right now.', 'error');
+    } finally {
+      setIsResettingData(false);
+    }
   };
 
   const handleKeyDown = (event) => {
@@ -1279,6 +1548,14 @@ export default function FitnessTracker() {
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <ResetDataModal
+        open={showResetModal}
+        confirmationText={resetConfirmationText}
+        setConfirmationText={setResetConfirmationText}
+        isResetting={isResettingData}
+        onClose={closeResetModal}
+        onConfirm={handleResetAllData}
+      />
 
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm">
@@ -1880,22 +2157,57 @@ export default function FitnessTracker() {
         )}
 
         {activeTab === 'profile' && (
-          <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-            <div className="mb-6 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-100">
-                <User size={18} className="text-indigo-500" />
+          <div className="space-y-4">
+            <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-100">
+                  <User size={18} className="text-indigo-500" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Profile and goals</h2>
+                  <p className="text-sm text-slate-500">{user ? 'Saved automatically' : 'Stored on this device in guest mode'}</p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">Profile and goals</h2>
-                <p className="text-sm text-slate-500">{user ? 'Saved automatically' : 'Stored on this device in guest mode'}</p>
-              </div>
-            </div>
 
-            <div className="mb-6 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="mb-6 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tracked days</div>
+                  <div className="mt-1 text-2xl font-bold text-slate-800">{trackedDateKeys.length}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Logged entries</div>
+                  <div className="mt-1 text-2xl font-bold text-slate-800">{trackedEntryCount}</div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">History health</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-700">
+                    {trackedEntryCount ? 'History is active' : 'Ready for your first entry'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-6 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Height', key: 'height', placeholder: 'e.g. 183 cm or 6 ft' },
+                    { label: 'Weight', key: 'weight', placeholder: 'e.g. 180 lb or 82 kg' },
+                  ].map(({ label, key, placeholder }) => (
+                    <div key={key}>
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</label>
+                      <input
+                        type="text"
+                        value={profile[key]}
+                        onChange={(event) => setProfile((previous) => ({ ...previous, [key]: event.target.value }))}
+                        placeholder={placeholder}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+
                 {[
-                  { label: 'Height', key: 'height', placeholder: 'e.g. 183 cm or 6 ft' },
-                  { label: 'Weight', key: 'weight', placeholder: 'e.g. 180 lb or 82 kg' },
+                  { label: 'Fitness goal', key: 'goal', placeholder: 'e.g. lose fat while keeping muscle' },
+                  { label: 'Workout frequency', key: 'workout_frequency', placeholder: 'e.g. 4 to 5 sessions per week' },
                 ].map(({ label, key, placeholder }) => (
                   <div key={key}>
                     <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</label>
@@ -1908,70 +2220,111 @@ export default function FitnessTracker() {
                     />
                   </div>
                 ))}
-              </div>
 
-              {[
-                { label: 'Fitness goal', key: 'goal', placeholder: 'e.g. lose fat while keeping muscle' },
-                { label: 'Workout frequency', key: 'workout_frequency', placeholder: 'e.g. 4 to 5 sessions per week' },
-              ].map(({ label, key, placeholder }) => (
-                <div key={key}>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</label>
-                  <input
-                    type="text"
-                    value={profile[key]}
-                    onChange={(event) => setProfile((previous) => ({ ...previous, [key]: event.target.value }))}
-                    placeholder={placeholder}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Additional info</label>
+                  <textarea
+                    value={profile.additional_info}
+                    onChange={(event) => setProfile((previous) => ({ ...previous, additional_info: event.target.value }))}
+                    placeholder="Diet preferences, allergies, or anything the goal setting should consider..."
+                    className="min-h-20 w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400"
                   />
                 </div>
-              ))}
+              </div>
 
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Additional info</label>
-                <textarea
-                  value={profile.additional_info}
-                  onChange={(event) => setProfile((previous) => ({ ...previous, additional_info: event.target.value }))}
-                  placeholder="Diet preferences, allergies, or anything the goal setting should consider..."
-                  className="min-h-20 w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                />
+              <button
+                onClick={generateGoals}
+                disabled={isGeneratingGoals}
+                className="mb-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-500 py-3 text-sm font-semibold text-white transition-all hover:bg-indigo-600 disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                {isGeneratingGoals ? (
+                  <>
+                    <Loader className="animate-spin" size={16} />
+                    Generating targets...
+                  </>
+                ) : (
+                  <>
+                    <Target size={16} />
+                    Generate goals with AI
+                  </>
+                )}
+              </button>
+
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Current goals</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Calories', value: goals.calories, unit: '', color: 'text-orange-500' },
+                    { label: 'Protein', value: goals.protein, unit: 'g', color: 'text-rose-500' },
+                    { label: 'Carbs', value: goals.carbs, unit: 'g', color: 'text-blue-500' },
+                    { label: 'Fats', value: goals.fats, unit: 'g', color: 'text-amber-500' },
+                  ].map(({ label, value, unit, color }) => (
+                    <div key={label} className="rounded-xl bg-white p-3">
+                      <div className="mb-0.5 text-xs text-slate-400">{label}</div>
+                      <div className={`text-xl font-bold ${color}`}>
+                        {value}
+                        <span className="text-sm font-normal text-slate-400">{unit}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <button
-              onClick={generateGoals}
-              disabled={isGeneratingGoals}
-              className="mb-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-500 py-3 text-sm font-semibold text-white transition-all hover:bg-indigo-600 disabled:bg-slate-200 disabled:text-slate-400"
-            >
-              {isGeneratingGoals ? (
-                <>
-                  <Loader className="animate-spin" size={16} />
-                  Generating targets...
-                </>
-              ) : (
-                <>
-                  <Target size={16} />
-                  Generate goals with AI
-                </>
-              )}
-            </button>
+            <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+              <div className="mb-5 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100">
+                  <Settings size={18} className="text-slate-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Data tools</h2>
+                  <p className="text-sm text-slate-500">
+                    Export your nutrition history or permanently clear tracker data when needed.
+                  </p>
+                </div>
+              </div>
 
-            <div className="rounded-2xl bg-slate-50 p-4">
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Current goals</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { label: 'Calories', value: goals.calories, unit: '', color: 'text-orange-500' },
-                  { label: 'Protein', value: goals.protein, unit: 'g', color: 'text-rose-500' },
-                  { label: 'Carbs', value: goals.carbs, unit: 'g', color: 'text-blue-500' },
-                  { label: 'Fats', value: goals.fats, unit: 'g', color: 'text-amber-500' },
-                ].map(({ label, value, unit, color }) => (
-                  <div key={label} className="rounded-xl bg-white p-3">
-                    <div className="mb-0.5 text-xs text-slate-400">{label}</div>
-                    <div className={`text-xl font-bold ${color}`}>
-                      {value}
-                      <span className="text-sm font-normal text-slate-400">{unit}</span>
-                    </div>
-                  </div>
-                ))}
+              <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                <button
+                  onClick={exportCsv}
+                  disabled={!trackedEntryCount}
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Download size={16} />
+                  Export CSV
+                </button>
+
+                <button
+                  onClick={() => {
+                    setResetConfirmationText('');
+                    setShowResetModal(true);
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
+                >
+                  <Trash2 size={16} />
+                  Reset all data
+                </button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="mb-1 text-sm font-semibold text-slate-700">CSV export</div>
+                  <p className="text-sm leading-6 text-slate-500">
+                    Download entry-level history with dates, names, macros, source labels, and timestamps for Excel or Google Sheets.
+                  </p>
+                  {!trackedEntryCount && (
+                    <p className="mt-2 text-xs font-medium text-slate-400">
+                      Add or import at least one entry before exporting.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
+                  <div className="mb-1 text-sm font-semibold text-red-700">Permanent reset</div>
+                  <p className="text-sm leading-6 text-red-600">
+                    This removes meals, daily history, imports, saved dates, insights, and local nutrition caches for this tracker.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

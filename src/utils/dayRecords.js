@@ -22,6 +22,7 @@ export function mapEntryFromDatabase(entry) {
     carbs: safeNumber(entry.carbs),
     fats: safeNumber(entry.fats),
     timestamp: entry.created_at || new Date().toISOString(),
+    source: entry.source || null,
   };
 }
 
