@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   AlertTriangle,
@@ -26,10 +26,7 @@ import {
   User,
   Wheat,
   X,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react';
-import Papa from 'papaparse';
 
 import {
   addEntriesToDay,
@@ -50,7 +47,9 @@ import {
   normalizeInsightResponse,
 } from './utils/dailyInsight';
 import { buildImportPreview, chunkArray } from './utils/importUtils';
-import { createDateFromKey, formatDateKey, formatDisplayDate } from './utils/date';
+import { formatDateKey, formatDisplayDate } from './utils/date';
+
+const CalendarView = lazy(() => import('./components/CalendarView.jsx'));
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -79,6 +78,9 @@ const GUEST_GOALS_KEY = 'fittrack:guest:goals';
 const GUEST_INSIGHTS_KEY = 'fittrack:guest:insights';
 const GUEST_ENTRY_SOURCES_KEY = 'fittrack:guest:entry-sources';
 
+const getUserProfileKey = (userId) => `fittrack:user:${userId}:profile`;
+const getUserGoalsKey = (userId) => `fittrack:user:${userId}:goals`;
+const getUserDayRecordsKey = (userId) => `fittrack:user:${userId}:day-records`;
 const getUserDayRegistryKey = (userId) => `fittrack:user:${userId}:day-registry`;
 const getUserInsightsKey = (userId) => `fittrack:user:${userId}:insights`;
 const getUserEntrySourcesKey = (userId) => `fittrack:user:${userId}:entry-sources`;
@@ -137,7 +139,14 @@ function hydrateLocalDayRecords(rawRecords = {}) {
   return hydrated;
 }
 
-function parseCsvText(text) {
+async function loadPapaParse() {
+  const module = await import('papaparse');
+  return module.default;
+}
+
+async function parseCsvText(text) {
+  const Papa = await loadPapaParse();
+
   return new Promise((resolve, reject) => {
     Papa.parse(text, {
       header: true,
@@ -164,6 +173,10 @@ function applyEntrySourcesToDayRecords(dayRecords, sourceMap = {}) {
   });
 
   return nextRecords;
+}
+
+function hasProfileDetails(profile) {
+  return Object.values(profile || {}).some((value) => String(value || '').trim());
 }
 
 function buildEntrySourceMap(entries = [], source) {
@@ -419,12 +432,99 @@ function ResetDataModal({ open, confirmationText, setConfirmationText, isResetti
   );
 }
 
+function LoadingPulse({ className }) {
+  return <div className={`animate-pulse rounded-2xl bg-slate-200/80 ${className}`} />;
+}
+
+function HomeStartupShell() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-2">
+          <LoadingPulse className="h-8 w-36" />
+          <LoadingPulse className="h-4 w-44" />
+        </div>
+        <div className="flex gap-1.5">
+          <LoadingPulse className="h-10 w-10 rounded-xl" />
+          <LoadingPulse className="h-10 w-16 rounded-xl" />
+          <LoadingPulse className="h-10 w-10 rounded-xl" />
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+        <div className="mb-6 flex items-center gap-6">
+          <LoadingPulse className="h-20 w-20 rounded-full" />
+          <div className="space-y-2">
+            <LoadingPulse className="h-9 w-28" />
+            <LoadingPulse className="h-4 w-24" />
+            <LoadingPulse className="h-3 w-20" />
+          </div>
+        </div>
+        <div className="space-y-4">
+          <LoadingPulse className="h-12 w-full" />
+          <LoadingPulse className="h-12 w-full" />
+          <LoadingPulse className="h-12 w-full" />
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <LoadingPulse className="h-11 w-11" />
+            <div className="space-y-2">
+              <LoadingPulse className="h-5 w-28" />
+              <LoadingPulse className="h-4 w-56" />
+            </div>
+          </div>
+          <LoadingPulse className="h-10 w-28 rounded-xl" />
+        </div>
+        <div className="space-y-3">
+          <LoadingPulse className="h-20 w-full" />
+          <div className="grid gap-3 md:grid-cols-2">
+            <LoadingPulse className="h-28 w-full" />
+            <LoadingPulse className="h-28 w-full" />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <LoadingPulse className="h-5 w-24" />
+          <LoadingPulse className="h-6 w-36 rounded-full" />
+        </div>
+        <LoadingPulse className="mb-3 h-24 w-full" />
+        <LoadingPulse className="h-12 w-full" />
+      </div>
+    </div>
+  );
+}
+
+function CalendarPanelFallback() {
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+      <div className="mb-6 flex items-center justify-between">
+        <LoadingPulse className="h-10 w-10 rounded-xl" />
+        <LoadingPulse className="h-8 w-40" />
+        <LoadingPulse className="h-10 w-10 rounded-xl" />
+      </div>
+      <LoadingPulse className="mb-6 h-4 w-52" />
+      <div className="grid grid-cols-7 gap-1.5">
+        {Array.from({ length: 35 }, (_, index) => (
+          <LoadingPulse key={index} className="min-h-[86px] w-full rounded-2xl" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function FitnessTracker() {
   const skipNextProfileSaveRef = useRef(false);
   const skipNextGoalsSaveRef = useRef(false);
+  const hydrationRunRef = useRef(0);
 
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [isHydratingUserData, setIsHydratingUserData] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -457,22 +557,29 @@ export default function FitnessTracker() {
 
   const [toasts, setToasts] = useState([]);
 
-  const selectedDateKey = formatDateKey(currentDate);
-  const selectedDay = getDayRecord(dailyData, selectedDateKey);
+  const selectedDateKey = useMemo(() => formatDateKey(currentDate), [currentDate]);
+  const selectedDay = useMemo(() => getDayRecord(dailyData, selectedDateKey), [dailyData, selectedDateKey]);
   const selectedEntries = selectedDay.entries;
-  const totals = sumEntries(selectedEntries);
-  const trackedDateKeys = listKnownDateKeys(dailyData);
-  const trackedEntryCount = trackedDateKeys.reduce(
-    (sum, dateKey) => sum + getDayRecord(dailyData, dateKey).entries.length,
-    0
+  const totals = useMemo(() => sumEntries(selectedEntries), [selectedEntries]);
+  const trackedDateKeys = useMemo(() => listKnownDateKeys(dailyData), [dailyData]);
+  const trackedEntryCount = useMemo(
+    () => trackedDateKeys.reduce((sum, dateKey) => sum + getDayRecord(dailyData, dateKey).entries.length, 0),
+    [dailyData, trackedDateKeys]
   );
   const hasTrackedDay = Boolean(dailyData[selectedDateKey]);
   const isToday = selectedDateKey === formatDateKey(new Date());
-  const insightFingerprint = buildInsightFingerprint({ entries: selectedEntries, totals, goals });
+  const insightFingerprint = useMemo(
+    () => buildInsightFingerprint({ entries: selectedEntries, totals, goals }),
+    [goals, selectedEntries, totals]
+  );
   const currentInsightState = dailyInsights[selectedDateKey];
-  const insight = selectedEntries.length
-    ? currentInsightState?.data || buildFallbackInsight({ entries: selectedEntries, totals, goals })
-    : buildFallbackInsight({ entries: [], totals, goals });
+  const insight = useMemo(
+    () =>
+      selectedEntries.length
+        ? currentInsightState?.data || buildFallbackInsight({ entries: selectedEntries, totals, goals })
+        : buildFallbackInsight({ entries: [], totals, goals }),
+    [currentInsightState?.data, goals, selectedEntries, totals]
+  );
   const insightStatus = selectedEntries.length ? currentInsightState?.status || 'idle' : 'empty';
 
   const addToast = useCallback((message, type = 'info', duration = 3500) => {
@@ -487,52 +594,148 @@ export default function FitnessTracker() {
     setToasts((previous) => previous.filter((toast) => toast.id !== id));
   }, []);
 
+  const applyTrackerSnapshot = useCallback(({ nextProfile, nextGoals, nextDailyData, nextDailyInsights, nextEntrySources }, options = {}) => {
+    const commit = () => {
+      setProfile({ ...DEFAULT_PROFILE, ...(nextProfile || {}) });
+      setGoals({ ...DEFAULT_GOALS, ...(nextGoals || {}) });
+      setEntrySources(nextEntrySources || {});
+      setDailyData(applyEntrySourcesToDayRecords(nextDailyData || {}, nextEntrySources || {}));
+      setDailyInsights(nextDailyInsights || {});
+    };
+
+    if (options.nonUrgent) {
+      startTransition(commit);
+      return;
+    }
+
+    commit();
+  }, []);
+
   const loadGuestState = useCallback(() => {
     const storedSources = readStoredJson(GUEST_ENTRY_SOURCES_KEY, {});
     const storedDayRecords = hydrateLocalDayRecords(readStoredJson(GUEST_DAY_RECORDS_KEY, {}));
 
-    setProfile({ ...DEFAULT_PROFILE, ...readStoredJson(GUEST_PROFILE_KEY, DEFAULT_PROFILE) });
-    setGoals({ ...DEFAULT_GOALS, ...readStoredJson(GUEST_GOALS_KEY, DEFAULT_GOALS) });
-    setEntrySources(storedSources);
-    setDailyData(applyEntrySourcesToDayRecords(storedDayRecords, storedSources));
-    setDailyInsights(readStoredJson(GUEST_INSIGHTS_KEY, {}));
-  }, []);
+    applyTrackerSnapshot({
+      nextProfile: readStoredJson(GUEST_PROFILE_KEY, DEFAULT_PROFILE),
+      nextGoals: readStoredJson(GUEST_GOALS_KEY, DEFAULT_GOALS),
+      nextDailyData: storedDayRecords,
+      nextDailyInsights: readStoredJson(GUEST_INSIGHTS_KEY, {}),
+      nextEntrySources: storedSources,
+    });
+  }, [applyTrackerSnapshot]);
 
-  const loadUserData = useCallback(async (currentUser) => {
+  const restoreUserCache = useCallback((userId) => {
+    const cachedProfile = readStoredJson(getUserProfileKey(userId), DEFAULT_PROFILE);
+    const cachedGoals = readStoredJson(getUserGoalsKey(userId), DEFAULT_GOALS);
+    const cachedInsights = readStoredJson(getUserInsightsKey(userId), {});
+    const cachedSources = readStoredJson(getUserEntrySourcesKey(userId), {});
+    const cachedDayRecords = hydrateLocalDayRecords(readStoredJson(getUserDayRecordsKey(userId), {}));
+
+    const hasCache =
+      Object.keys(cachedDayRecords).length > 0 ||
+      Object.keys(cachedInsights).length > 0 ||
+      Object.keys(cachedSources).length > 0 ||
+      hasProfileDetails(cachedProfile) ||
+      JSON.stringify(cachedGoals) !== JSON.stringify(DEFAULT_GOALS);
+
+    if (!hasCache) {
+      return false;
+    }
+
+    applyTrackerSnapshot({
+      nextProfile: cachedProfile,
+      nextGoals: cachedGoals,
+      nextDailyData: cachedDayRecords,
+      nextDailyInsights: cachedInsights,
+      nextEntrySources: cachedSources,
+    });
+
+    return true;
+  }, [applyTrackerSnapshot]);
+
+  const loadUserData = useCallback(async (currentUser, { hasCache = false, runId } = {}) => {
+    const storedDates = readStoredJson(getUserDayRegistryKey(currentUser.id), []);
+    const storedSources = readStoredJson(getUserEntrySourcesKey(currentUser.id), {});
+    const storedInsights = readStoredJson(getUserInsightsKey(currentUser.id), {});
+
     try {
-      const [profileResult, goalsResult, entriesResult] = await Promise.all([
+      const todayDateKey = formatDateKey(new Date());
+      const [profileResult, goalsResult, todayEntriesResult] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', currentUser.id).maybeSingle(),
         supabase.from('goals').select('*').eq('user_id', currentUser.id).maybeSingle(),
-        supabase.from('food_entries').select('*').eq('user_id', currentUser.id).order('date', { ascending: false }),
+        supabase.from('food_entries').select('*').eq('user_id', currentUser.id).eq('date', todayDateKey).order('created_at', { ascending: false }),
       ]);
+
+      if (runId !== hydrationRunRef.current) return;
 
       if (profileResult.error) throw profileResult.error;
       if (goalsResult.error) throw goalsResult.error;
-      if (entriesResult.error) throw entriesResult.error;
+      if (todayEntriesResult.error) throw todayEntriesResult.error;
 
-      const storedDates = readStoredJson(getUserDayRegistryKey(currentUser.id), []);
-      const storedSources = readStoredJson(getUserEntrySourcesKey(currentUser.id), {});
-      const organized = applyEntrySourcesToDayRecords(
-        organizeEntriesByDay(entriesResult.data || [], storedDates),
-        storedSources
+      const nextProfile = { ...DEFAULT_PROFILE, ...(profileResult.data || {}) };
+      const nextGoals = { ...DEFAULT_GOALS, ...(goalsResult.data || {}) };
+
+      if (hasCache) {
+        startTransition(() => {
+          setProfile(nextProfile);
+          setGoals(nextGoals);
+        });
+      } else {
+        const todaysRecords = organizeEntriesByDay(todayEntriesResult.data || [], storedDates);
+
+        applyTrackerSnapshot(
+          {
+            nextProfile,
+            nextGoals,
+            nextDailyData: todaysRecords,
+            nextDailyInsights: storedInsights,
+            nextEntrySources: storedSources,
+          },
+          { nonUrgent: true }
+        );
+      }
+
+      const { data: entries, error: entriesError } = await supabase
+        .from('food_entries')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .order('date', { ascending: false });
+
+      if (runId !== hydrationRunRef.current) return;
+      if (entriesError) throw entriesError;
+
+      applyTrackerSnapshot(
+        {
+          nextProfile,
+          nextGoals,
+          nextDailyData: organizeEntriesByDay(entries || [], storedDates),
+          nextDailyInsights: storedInsights,
+          nextEntrySources: storedSources,
+        },
+        { nonUrgent: true }
       );
-
-      setProfile({
-        ...DEFAULT_PROFILE,
-        ...(profileResult.data || {}),
-      });
-      setGoals({
-        ...DEFAULT_GOALS,
-        ...(goalsResult.data || {}),
-      });
-      setEntrySources(storedSources);
-      setDailyData(organized);
-      setDailyInsights(readStoredJson(getUserInsightsKey(currentUser.id), {}));
     } catch (error) {
+      if (runId !== hydrationRunRef.current) return;
       console.error('Error loading user data:', error);
       addToast('Unable to load your saved nutrition data right now.', 'error');
+    } finally {
+      if (runId === hydrationRunRef.current) {
+        setIsHydratingUserData(false);
+      }
     }
-  }, [addToast]);
+  }, [addToast, applyTrackerSnapshot]);
+
+  const beginUserHydration = useCallback((nextUser) => {
+    const runId = hydrationRunRef.current + 1;
+    hydrationRunRef.current = runId;
+
+    setUser(nextUser);
+    setIsHydratingUserData(true);
+    const hasCache = restoreUserCache(nextUser.id);
+    setIsBootstrapping(false);
+
+    void loadUserData(nextUser, { hasCache, runId });
+  }, [loadUserData, restoreUserCache]);
 
   useEffect(() => {
     let isMounted = true;
@@ -546,17 +749,20 @@ export default function FitnessTracker() {
         if (!isMounted) return;
 
         if (session?.user) {
-          setUser(session.user);
-          await loadUserData(session.user);
+          beginUserHydration(session.user);
         } else {
           setUser(null);
           loadGuestState();
+          setIsHydratingUserData(false);
+          setIsBootstrapping(false);
         }
       } catch (error) {
         console.error(error);
-      } finally {
         if (isMounted) {
-          setLoading(false);
+          setUser(null);
+          loadGuestState();
+          setIsBootstrapping(false);
+          setIsHydratingUserData(false);
         }
       }
     };
@@ -565,47 +771,53 @@ export default function FitnessTracker() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return;
 
       setShowMenu(false);
 
       if (session?.user) {
-        setUser(session.user);
-        await loadUserData(session.user);
+        beginUserHydration(session.user);
       } else {
+        hydrationRunRef.current += 1;
         setUser(null);
         loadGuestState();
+        setIsHydratingUserData(false);
+        setIsBootstrapping(false);
       }
-
-      setLoading(false);
     });
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [loadGuestState, loadUserData]);
+  }, [beginUserHydration, loadGuestState]);
 
   useEffect(() => {
-    if (loading || user) return;
+    if (isBootstrapping || user) return;
 
     writeStoredJson(GUEST_DAY_RECORDS_KEY, dailyData);
     writeStoredJson(GUEST_PROFILE_KEY, profile);
     writeStoredJson(GUEST_GOALS_KEY, goals);
     writeStoredJson(GUEST_INSIGHTS_KEY, dailyInsights);
     writeStoredJson(GUEST_ENTRY_SOURCES_KEY, entrySources);
-  }, [dailyData, dailyInsights, entrySources, goals, loading, profile, user]);
+  }, [dailyData, dailyInsights, entrySources, goals, isBootstrapping, profile, user]);
 
   useEffect(() => {
-    if (loading || !user) return;
+    if (isBootstrapping || !user || isHydratingUserData) return;
+
+    writeStoredJson(getUserDayRecordsKey(user.id), dailyData);
     writeStoredJson(getUserDayRegistryKey(user.id), extractPreservedDates(dailyData));
-  }, [dailyData, loading, user]);
+  }, [dailyData, isBootstrapping, isHydratingUserData, user]);
 
   useEffect(() => {
-    if (loading) return;
+    if (isBootstrapping) return;
 
     if (user) {
+      if (isHydratingUserData) return;
+
+      writeStoredJson(getUserProfileKey(user.id), profile);
+      writeStoredJson(getUserGoalsKey(user.id), goals);
       writeStoredJson(getUserInsightsKey(user.id), dailyInsights);
       writeStoredJson(getUserEntrySourcesKey(user.id), entrySources);
       return;
@@ -613,7 +825,7 @@ export default function FitnessTracker() {
 
     writeStoredJson(GUEST_INSIGHTS_KEY, dailyInsights);
     writeStoredJson(GUEST_ENTRY_SOURCES_KEY, entrySources);
-  }, [dailyInsights, entrySources, loading, user]);
+  }, [dailyInsights, entrySources, goals, isBootstrapping, isHydratingUserData, profile, user]);
 
   const saveProfile = useCallback(async () => {
     if (!user) return;
@@ -656,7 +868,7 @@ export default function FitnessTracker() {
   }, [goals, user]);
 
   useEffect(() => {
-    if (!user || !profile.height) return undefined;
+    if (!user || !profile.height || isBootstrapping || isHydratingUserData) return undefined;
     if (skipNextProfileSaveRef.current) {
       skipNextProfileSaveRef.current = false;
       return undefined;
@@ -667,10 +879,10 @@ export default function FitnessTracker() {
     }, 700);
 
     return () => window.clearTimeout(timeout);
-  }, [profile, saveProfile, user]);
+  }, [isBootstrapping, isHydratingUserData, profile, saveProfile, user]);
 
   useEffect(() => {
-    if (!user) return undefined;
+    if (!user || isBootstrapping || isHydratingUserData) return undefined;
     if (skipNextGoalsSaveRef.current) {
       skipNextGoalsSaveRef.current = false;
       return undefined;
@@ -681,7 +893,7 @@ export default function FitnessTracker() {
     }, 700);
 
     return () => window.clearTimeout(timeout);
-  }, [goals, saveGoals, user]);
+  }, [goals, isBootstrapping, isHydratingUserData, saveGoals, user]);
 
   const handleAuth = async () => {
     setAuthError('');
@@ -737,7 +949,7 @@ export default function FitnessTracker() {
   };
 
   const refreshDailyInsight = useCallback(async (forceRefresh = false) => {
-    if (!selectedEntries.length) return;
+    if (!selectedEntries.length || isBootstrapping || isHydratingUserData) return;
 
     const fingerprint = buildInsightFingerprint({ entries: selectedEntries, totals, goals });
     const existingInsight = dailyInsights[selectedDateKey];
@@ -809,10 +1021,10 @@ export default function FitnessTracker() {
         addToast('Insight refresh fell back to local coaching.', 'info');
       }
     }
-  }, [addToast, dailyInsights, goals, selectedDateKey, selectedEntries, totals]);
+  }, [addToast, dailyInsights, goals, isBootstrapping, isHydratingUserData, selectedDateKey, selectedEntries, totals]);
 
   useEffect(() => {
-    if (!selectedEntries.length) return undefined;
+    if (!selectedEntries.length || isBootstrapping || isHydratingUserData || activeTab !== 'home') return undefined;
 
     if (
       currentInsightState?.fingerprint === insightFingerprint &&
@@ -821,15 +1033,43 @@ export default function FitnessTracker() {
       return undefined;
     }
 
-    const timeout = window.setTimeout(() => {
-      refreshDailyInsight(false);
-    }, 450);
+    let timeoutId = null;
+    let idleId = null;
 
-    return () => window.clearTimeout(timeout);
-  }, [currentInsightState?.fingerprint, currentInsightState?.status, insightFingerprint, refreshDailyInsight, selectedEntries.length]);
+    const runInsightRefresh = () => {
+      timeoutId = window.setTimeout(() => {
+        refreshDailyInsight(false);
+      }, 900);
+    };
+
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(runInsightRefresh, { timeout: 1500 });
+    } else {
+      runInsightRefresh();
+    }
+
+    return () => {
+      if (idleId !== null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId);
+      }
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    activeTab,
+    currentInsightState?.fingerprint,
+    currentInsightState?.status,
+    insightFingerprint,
+    isBootstrapping,
+    isHydratingUserData,
+    refreshDailyInsight,
+    selectedEntries.length,
+  ]);
 
   const processInput = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isMutationLocked) return;
 
     setIsProcessing(true);
     setLastParsed(null);
@@ -912,6 +1152,8 @@ export default function FitnessTracker() {
   };
 
   const deleteEntry = async (entry) => {
+    if (isMutationLocked) return;
+
     try {
       if (user) {
         const { error } = await supabase.from('food_entries').delete().eq('id', entry.id);
@@ -941,6 +1183,8 @@ export default function FitnessTracker() {
   };
 
   const generateGoals = async () => {
+    if (isMutationLocked) return;
+
     if (!profile.height || !profile.weight || !profile.goal) {
       addToast('Fill in height, weight, and goal first.', 'error');
       return;
@@ -1010,6 +1254,8 @@ export default function FitnessTracker() {
   };
 
   const handleFileImport = async (event) => {
+    if (isMutationLocked) return;
+
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -1043,6 +1289,8 @@ export default function FitnessTracker() {
   };
 
   const confirmImport = async () => {
+    if (isMutationLocked) return;
+
     if (!importPreview?.validRows?.length) return;
 
     setIsImporting(true);
@@ -1158,7 +1406,7 @@ export default function FitnessTracker() {
     setImportSummary(null);
   };
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
     const exportRows = flattenEntriesForExport(dailyData);
 
     if (!exportRows.length) {
@@ -1166,6 +1414,7 @@ export default function FitnessTracker() {
       return;
     }
 
+    const Papa = await loadPapaParse();
     const csv = Papa.unparse(exportRows, {
       columns: ['date', 'entry_name', 'calories', 'protein', 'carbs', 'fats', 'source', 'created_at'],
     });
@@ -1263,277 +1512,6 @@ export default function FitnessTracker() {
     }
   };
 
-  const MonthView = ({ year, month }) => {
-    const firstDay = new Date(year, month, 1);
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const startDayOfWeek = firstDay.getDay();
-    const cells = [
-      ...Array(startDayOfWeek).fill(null),
-      ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
-    ];
-
-    return (
-      <>
-        <div className="mb-2 grid grid-cols-7">
-          {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => (
-            <div key={day} className="py-2 text-center text-xs font-semibold text-slate-400">
-              {day}
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-7 gap-1.5">
-          {cells.map((day, index) => {
-            if (!day) {
-              return <div key={`empty-${index}`} className="min-h-[86px] rounded-xl border border-transparent" />;
-            }
-
-            const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const record = dailyData[dateKey];
-            const entryTotals = record ? sumEntries(record.entries) : null;
-            const hasEntriesForDay = Boolean(record?.entries.length);
-            const isSelected = selectedDateKey === dateKey;
-            const isCalendarToday = formatDateKey(new Date()) === dateKey;
-
-            return (
-              <button
-                key={dateKey}
-                onClick={() => {
-                  const nextDate = createDateFromKey(dateKey);
-                  if (nextDate) {
-                    setCurrentDate(nextDate);
-                    setActiveTab('home');
-                  }
-                }}
-                className={`min-h-[86px] rounded-2xl border p-2 text-left transition-all ${
-                  isSelected
-                    ? 'border-emerald-400 bg-emerald-50'
-                    : hasEntriesForDay
-                      ? 'border-slate-200 bg-slate-50 hover:border-slate-300'
-                      : record
-                        ? 'border-dashed border-slate-200 bg-white hover:border-slate-300'
-                        : 'border-slate-100 bg-white hover:border-slate-200'
-                }`}
-              >
-                <div className={`mb-1 text-xs font-bold ${isCalendarToday || isSelected ? 'text-emerald-600' : 'text-slate-600'}`}>
-                  {day}
-                </div>
-
-                {hasEntriesForDay && entryTotals && (
-                  <div className="space-y-0.5">
-                    <div className="text-xs font-semibold text-orange-500">{entryTotals.calories.toFixed(0)} cal</div>
-                    <div className="text-[11px] text-rose-400">P{entryTotals.protein.toFixed(0)}</div>
-                    <div className="text-[11px] text-blue-400">C{entryTotals.carbs.toFixed(0)}</div>
-                  </div>
-                )}
-
-                {!hasEntriesForDay && record && (
-                  <div className="text-[11px] font-medium text-slate-400">Saved day</div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </>
-    );
-  };
-
-  const getMonthStats = (year, month) => {
-    const monthKeys = trackedDateKeys.filter((dateKey) => {
-      const [dateYear, dateMonth] = dateKey.split('-').map(Number);
-      return dateYear === year && dateMonth === month + 1;
-    });
-
-    if (!monthKeys.length) return null;
-
-    const daysWithEntries = monthKeys.filter((dateKey) => getDayRecord(dailyData, dateKey).entries.length > 0);
-    const totalCalories = daysWithEntries.reduce(
-      (sum, dateKey) => sum + sumEntries(getDayRecord(dailyData, dateKey).entries).calories,
-      0
-    );
-
-    return {
-      daysTracked: monthKeys.length,
-      daysWithEntries: daysWithEntries.length,
-      averageCalories: daysWithEntries.length ? totalCalories / daysWithEntries.length : 0,
-    };
-  };
-
-  const YearView = ({ year }) => {
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    return (
-      <div className="grid grid-cols-3 gap-3 md:grid-cols-4">
-        {Array.from({ length: 12 }, (_, month) => {
-          const stats = getMonthStats(year, month);
-          const isCurrentMonth = month === currentDate.getMonth() && year === currentDate.getFullYear();
-
-          return (
-            <button
-              key={`${year}-${month}`}
-              onClick={() => {
-                setCurrentDate(new Date(year, month, 1));
-                setCalendarView('month');
-              }}
-              className={`rounded-2xl border-2 p-4 text-left transition-all hover:shadow-md ${
-                isCurrentMonth
-                  ? 'border-emerald-400 bg-emerald-50'
-                  : stats
-                    ? 'border-slate-200 bg-slate-50'
-                    : 'border-slate-100 bg-white'
-              }`}
-            >
-              <div className="mb-1 font-semibold text-slate-700">{monthNames[month]}</div>
-              {stats ? (
-                <div className="space-y-0.5 text-xs text-slate-500">
-                  <div>{stats.daysTracked} tracked days</div>
-                  <div className="font-semibold text-orange-500">
-                    {stats.daysWithEntries ? `${stats.averageCalories.toFixed(0)} cal/day` : 'No logged meals'}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs text-slate-300">No history yet</div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const MultiYearView = ({ focusYear }) => {
-    const years = Array.from({ length: 12 }, (_, index) => focusYear + index - 6);
-
-    return (
-      <div className="grid grid-cols-3 gap-3 md:grid-cols-4">
-        {years.map((year) => {
-          const yearKeys = trackedDateKeys.filter((dateKey) => Number(dateKey.slice(0, 4)) === year);
-          const daysWithEntries = yearKeys.filter((dateKey) => getDayRecord(dailyData, dateKey).entries.length > 0);
-          const totalCalories = daysWithEntries.reduce(
-            (sum, dateKey) => sum + sumEntries(getDayRecord(dailyData, dateKey).entries).calories,
-            0
-          );
-          const averageCalories = daysWithEntries.length ? totalCalories / daysWithEntries.length : 0;
-
-          return (
-            <button
-              key={year}
-              onClick={() => {
-                setCurrentDate(new Date(year, 0, 1));
-                setCalendarView('year');
-              }}
-              className={`rounded-2xl border-2 p-5 text-left transition-all hover:shadow-md ${
-                year === currentDate.getFullYear()
-                  ? 'border-emerald-400 bg-emerald-50'
-                  : yearKeys.length
-                    ? 'border-slate-200 bg-slate-50'
-                    : 'border-slate-100 bg-white'
-              }`}
-            >
-              <div className="mb-1 text-lg font-bold text-slate-700">{year}</div>
-              {yearKeys.length ? (
-                <div className="text-xs text-slate-500">
-                  {yearKeys.length} tracked days
-                  <div className="mt-1 font-semibold text-orange-500">
-                    {daysWithEntries.length ? `${averageCalories.toFixed(0)} cal/day` : 'No logged meals'}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs text-slate-300">No history yet</div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const CalendarView = () => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const monthNames = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    const changeMonth = (delta) => setCurrentDate(new Date(year, month + delta, 1));
-    const changeYear = (delta) => setCurrentDate(new Date(year + delta, month, 1));
-    const zoomIn = () => {
-      if (calendarView === 'multi-year') setCalendarView('year');
-      else if (calendarView === 'year') setCalendarView('month');
-    };
-    const zoomOut = () => {
-      if (calendarView === 'month') setCalendarView('year');
-      else if (calendarView === 'year') setCalendarView('multi-year');
-    };
-    const previous = () =>
-      calendarView === 'month' ? changeMonth(-1) : calendarView === 'year' ? changeYear(-1) : changeYear(-6);
-    const next = () =>
-      calendarView === 'month' ? changeMonth(1) : calendarView === 'year' ? changeYear(1) : changeYear(6);
-
-    return (
-      <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-        <div className="mb-2 flex items-center justify-between">
-          <button onClick={previous} className="rounded-xl p-2 transition-colors hover:bg-slate-100">
-            <ChevronLeft size={20} className="text-slate-600" />
-          </button>
-
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold text-slate-800">
-              {calendarView === 'month' && `${monthNames[month]} ${year}`}
-              {calendarView === 'year' && year}
-              {calendarView === 'multi-year' && `${year - 6} - ${year + 5}`}
-            </h2>
-            <div className="flex gap-1.5">
-              <button
-                onClick={zoomOut}
-                disabled={calendarView === 'multi-year'}
-                className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 disabled:opacity-30"
-              >
-                <ZoomOut size={16} className="text-slate-500" />
-              </button>
-              <button
-                onClick={zoomIn}
-                disabled={calendarView === 'month'}
-                className="rounded-lg p-1.5 transition-colors hover:bg-slate-100 disabled:opacity-30"
-              >
-                <ZoomIn size={16} className="text-slate-500" />
-              </button>
-            </div>
-          </div>
-
-          <button onClick={next} className="rounded-xl p-2 transition-colors hover:bg-slate-100">
-            <ChevronRight size={20} className="text-slate-600" />
-          </button>
-        </div>
-
-        <p className="mb-6 text-sm text-slate-500">Tap any day to open its daily dashboard.</p>
-
-        {calendarView === 'month' && <MonthView year={year} month={month} />}
-        {calendarView === 'year' && <YearView year={year} />}
-        {calendarView === 'multi-year' && <MultiYearView focusYear={year} />}
-      </div>
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <Loader className="animate-spin text-emerald-500" size={36} />
-      </div>
-    );
-  }
-
   const progressPercentage = Math.round((totals.calories / (goals.calories || 1)) * 100);
   const remainingCalories = Math.max(0, goals.calories - totals.calories);
   const selectedDateLabel = isToday
@@ -1544,6 +1522,10 @@ export default function FitnessTracker() {
     day: 'numeric',
     year: 'numeric',
   });
+  const hasVisibleShellData = trackedDateKeys.length > 0 || selectedEntries.length > 0 || hasProfileDetails(profile);
+  const showHomeStartupShell = activeTab === 'home' && (isBootstrapping || isHydratingUserData) && !hasVisibleShellData;
+  const isAccountSyncing = isBootstrapping || isHydratingUserData;
+  const isMutationLocked = Boolean(user && isHydratingUserData);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
@@ -1728,8 +1710,27 @@ export default function FitnessTracker() {
         </div>
       )}
 
+      {isAccountSyncing && (
+        <div className="mx-auto max-w-3xl px-5 pt-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-white px-4 py-3 shadow-sm">
+            <Loader size={16} className="animate-spin text-emerald-500" />
+            <div>
+              <p className="text-sm font-semibold text-slate-700">
+                {isBootstrapping ? 'Loading your tracker shell...' : 'Syncing your nutrition history...'}
+              </p>
+              <p className="text-xs text-slate-500">
+                The app is usable now, and the rest of your data will finish loading in the background.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto max-w-3xl space-y-4 px-5 pt-5">
         {activeTab === 'home' && (
+          showHomeStartupShell ? (
+            <HomeStartupShell />
+          ) : (
           <>
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1835,7 +1836,7 @@ export default function FitnessTracker() {
                 value={inputText}
                 onChange={(event) => setInputText(event.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isProcessing}
+                disabled={isProcessing || isMutationLocked}
                 rows={2}
                 placeholder="Try: grilled chicken sandwich, 2 eggs with toast, large coffee with oat milk..."
                 className="mb-3 w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700 transition-all placeholder:text-slate-300 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400"
@@ -1843,7 +1844,7 @@ export default function FitnessTracker() {
 
               <button
                 onClick={processInput}
-                disabled={isProcessing || !inputText.trim()}
+                disabled={isProcessing || isMutationLocked || !inputText.trim()}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-3 text-sm font-semibold text-white transition-all hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400"
               >
                 {isProcessing ? (
@@ -1858,6 +1859,12 @@ export default function FitnessTracker() {
                   </>
                 )}
               </button>
+
+              {isMutationLocked && (
+                <p className="mt-3 text-xs font-medium text-slate-400">
+                  Account data is still syncing, so food logging will unlock in a moment.
+                </p>
+              )}
 
               {lastParsed && (
                 <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
@@ -1930,6 +1937,7 @@ export default function FitnessTracker() {
                         {!isConfirmingDelete ? (
                           <button
                             onClick={() => setConfirmDeleteId(entry.id)}
+                            disabled={isMutationLocked}
                             className="rounded-lg p-2 text-red-400 opacity-0 transition-all hover:bg-red-50 group-hover:opacity-100"
                           >
                             <Trash2 size={15} />
@@ -1938,6 +1946,7 @@ export default function FitnessTracker() {
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => deleteEntry(entry)}
+                              disabled={isMutationLocked}
                               className="rounded-lg bg-red-500 p-2 text-white transition-colors hover:bg-red-600"
                             >
                               <Check size={14} />
@@ -1957,9 +1966,23 @@ export default function FitnessTracker() {
               )}
             </div>
           </>
+          )
         )}
 
-        {activeTab === 'calendar' && <CalendarView />}
+        {activeTab === 'calendar' && (
+          <Suspense fallback={<CalendarPanelFallback />}>
+            <CalendarView
+              currentDate={currentDate}
+              setCurrentDate={setCurrentDate}
+              calendarView={calendarView}
+              setCalendarView={setCalendarView}
+              dailyData={dailyData}
+              selectedDateKey={selectedDateKey}
+              trackedDateKeys={trackedDateKeys}
+              setActiveTab={setActiveTab}
+            />
+          </Suspense>
+        )}
 
         {activeTab === 'import' && (
           <div className="space-y-4">
@@ -1990,11 +2013,11 @@ export default function FitnessTracker() {
                   accept=".csv,.txt,.tsv"
                   onChange={handleFileImport}
                   className="hidden"
-                  disabled={isPreparingImport || isImporting}
+                  disabled={isPreparingImport || isImporting || isMutationLocked}
                 />
                 <div
                   className={`flex w-full items-center justify-center gap-2.5 rounded-2xl px-6 py-4 text-sm font-semibold transition-all ${
-                    isPreparingImport || isImporting
+                    isPreparingImport || isImporting || isMutationLocked
                       ? 'bg-slate-100 text-slate-400'
                       : 'bg-emerald-500 text-white hover:bg-emerald-600'
                   }`}
@@ -2110,7 +2133,7 @@ export default function FitnessTracker() {
 
                 <button
                   onClick={confirmImport}
-                  disabled={!importPreview.summary.readyToImport || isImporting}
+                  disabled={!importPreview.summary.readyToImport || isImporting || isMutationLocked}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400"
                 >
                   {isImporting ? (
@@ -2234,7 +2257,7 @@ export default function FitnessTracker() {
 
               <button
                 onClick={generateGoals}
-                disabled={isGeneratingGoals}
+                disabled={isGeneratingGoals || isMutationLocked}
                 className="mb-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-500 py-3 text-sm font-semibold text-white transition-all hover:bg-indigo-600 disabled:bg-slate-200 disabled:text-slate-400"
               >
                 {isGeneratingGoals ? (
@@ -2287,7 +2310,7 @@ export default function FitnessTracker() {
               <div className="mb-4 grid gap-3 sm:grid-cols-2">
                 <button
                   onClick={exportCsv}
-                  disabled={!trackedEntryCount}
+                  disabled={!trackedEntryCount || isMutationLocked}
                   className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Download size={16} />
@@ -2299,7 +2322,8 @@ export default function FitnessTracker() {
                     setResetConfirmationText('');
                     setShowResetModal(true);
                   }}
-                  className="flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
+                  disabled={isMutationLocked}
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Trash2 size={16} />
                   Reset all data
