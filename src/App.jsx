@@ -1,5 +1,4 @@
 import React, { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import {
   AlertTriangle,
   Beef,
@@ -28,6 +27,9 @@ import {
   X,
 } from 'lucide-react';
 
+import { logout, signInWithEmail, signInWithGoogle, signUpWithEmail, subscribeToAuth } from './lib/authService';
+import { addMeals, deleteAllMeals, deleteMeal, getMeals } from './lib/mealService';
+import { getUserSettings, resetUserSettings, saveGoals as saveUserGoals, saveProfile as saveUserProfile } from './lib/userService';
 import {
   addEntriesToDay,
   buildExistingFingerprintSet,
@@ -47,14 +49,9 @@ import {
   normalizeInsightResponse,
 } from './utils/dailyInsight';
 import { buildImportPreview, chunkArray } from './utils/importUtils';
-import { formatDateKey, formatDisplayDate } from './utils/date';
+import { createDateFromKey, formatDateKey, formatDisplayDate } from './utils/date';
 
 const CalendarView = lazy(() => import('./components/CalendarView.jsx'));
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
 
 const DEFAULT_PROFILE = {
   username: '',
@@ -184,6 +181,18 @@ function buildEntrySourceMap(entries = [], source) {
     accumulator[entry.id] = source;
     return accumulator;
   }, {});
+}
+
+function toAppUser(firebaseUser) {
+  if (!firebaseUser) return null;
+
+  return {
+    id: firebaseUser.uid,
+    email: firebaseUser.email || '',
+    user_metadata: {
+      username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || '',
+    },
+  };
 }
 
 function flattenEntriesForExport(dayRecords) {
@@ -530,6 +539,7 @@ export default function FitnessTracker() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
 
   const [activeTab, setActiveTab] = useState('home');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -544,6 +554,7 @@ export default function FitnessTracker() {
 
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSavingMeal, setIsSavingMeal] = useState(false);
   const [isGeneratingGoals, setIsGeneratingGoals] = useState(false);
   const [isPreparingImport, setIsPreparingImport] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -660,20 +671,15 @@ export default function FitnessTracker() {
 
     try {
       const todayDateKey = formatDateKey(new Date());
-      const [profileResult, goalsResult, todayEntriesResult] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', currentUser.id).maybeSingle(),
-        supabase.from('goals').select('*').eq('user_id', currentUser.id).maybeSingle(),
-        supabase.from('food_entries').select('*').eq('user_id', currentUser.id).eq('date', todayDateKey).order('created_at', { ascending: false }),
+      const [settings, todayEntries] = await Promise.all([
+        getUserSettings(currentUser.id),
+        getMeals(currentUser.id, { date: todayDateKey }),
       ]);
 
       if (runId !== hydrationRunRef.current) return;
 
-      if (profileResult.error) throw profileResult.error;
-      if (goalsResult.error) throw goalsResult.error;
-      if (todayEntriesResult.error) throw todayEntriesResult.error;
-
-      const nextProfile = { ...DEFAULT_PROFILE, ...(profileResult.data || {}) };
-      const nextGoals = { ...DEFAULT_GOALS, ...(goalsResult.data || {}) };
+      const nextProfile = { ...DEFAULT_PROFILE, ...(settings.profile || {}) };
+      const nextGoals = { ...DEFAULT_GOALS, ...(settings.goals || {}) };
 
       if (hasCache) {
         startTransition(() => {
@@ -681,7 +687,7 @@ export default function FitnessTracker() {
           setGoals(nextGoals);
         });
       } else {
-        const todaysRecords = organizeEntriesByDay(todayEntriesResult.data || [], storedDates);
+        const todaysRecords = organizeEntriesByDay(todayEntries || [], storedDates);
 
         applyTrackerSnapshot(
           {
@@ -695,14 +701,9 @@ export default function FitnessTracker() {
         );
       }
 
-      const { data: entries, error: entriesError } = await supabase
-        .from('food_entries')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .order('date', { ascending: false });
+      const entries = await getMeals(currentUser.id);
 
       if (runId !== hydrationRunRef.current) return;
-      if (entriesError) throw entriesError;
 
       applyTrackerSnapshot(
         {
@@ -717,7 +718,7 @@ export default function FitnessTracker() {
     } catch (error) {
       if (runId !== hydrationRunRef.current) return;
       console.error('Error loading user data:', error);
-      addToast('Unable to load your saved nutrition data right now.', 'error');
+      addToast('Unable to load your saved nutrition data right now. Cached data is still available.', 'error');
     } finally {
       if (runId === hydrationRunRef.current) {
         setIsHydratingUserData(false);
@@ -742,20 +743,7 @@ export default function FitnessTracker() {
 
     const bootstrap = async () => {
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
         if (!isMounted) return;
-
-        if (session?.user) {
-          beginUserHydration(session.user);
-        } else {
-          setUser(null);
-          loadGuestState();
-          setIsHydratingUserData(false);
-          setIsBootstrapping(false);
-        }
       } catch (error) {
         console.error(error);
         if (isMounted) {
@@ -769,15 +757,15 @@ export default function FitnessTracker() {
 
     bootstrap();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    const unsubscribe = subscribeToAuth((firebaseUser) => {
       if (!isMounted) return;
 
       setShowMenu(false);
 
-      if (session?.user) {
-        beginUserHydration(session.user);
+      const appUser = toAppUser(firebaseUser);
+
+      if (appUser) {
+        beginUserHydration(appUser);
       } else {
         hydrationRunRef.current += 1;
         setUser(null);
@@ -789,7 +777,7 @@ export default function FitnessTracker() {
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, [beginUserHydration, loadGuestState]);
 
@@ -831,41 +819,30 @@ export default function FitnessTracker() {
     if (!user) return;
 
     try {
-      await supabase.from('profiles').upsert(
-        {
-          id: user.id,
-          username: profile.username || user.user_metadata?.username || user.email?.split('@')[0] || '',
-          height: profile.height,
-          weight: profile.weight,
-          goal: profile.goal,
-          workout_frequency: profile.workout_frequency,
-          additional_info: profile.additional_info,
-        },
-        { onConflict: 'id' }
-      );
+      await saveUserProfile(user.id, {
+        username: profile.username || user.user_metadata?.username || user.email?.split('@')[0] || '',
+        height: profile.height,
+        weight: profile.weight,
+        goal: profile.goal,
+        workout_frequency: profile.workout_frequency,
+        additional_info: profile.additional_info,
+      });
     } catch (error) {
       console.error('Profile save error:', error);
+      addToast('Couldn’t save profile changes. Try again.', 'error');
     }
-  }, [profile, user]);
+  }, [addToast, profile, user]);
 
   const saveGoals = useCallback(async () => {
     if (!user) return;
 
     try {
-      await supabase.from('goals').upsert(
-        {
-          user_id: user.id,
-          calories: goals.calories,
-          protein: goals.protein,
-          carbs: goals.carbs,
-          fats: goals.fats,
-        },
-        { onConflict: 'user_id' }
-      );
+      await saveUserGoals(user.id, goals);
     } catch (error) {
       console.error('Goals save error:', error);
+      addToast('Couldn’t save goals. Try again.', 'error');
     }
-  }, [goals, user]);
+  }, [addToast, goals, user]);
 
   useEffect(() => {
     if (!user || !profile.height || isBootstrapping || isHydratingUserData) return undefined;
@@ -903,49 +880,54 @@ export default function FitnessTracker() {
       return;
     }
 
+    setIsAuthSubmitting(true);
+
     try {
       if (authMode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { username: email.split('@')[0] } },
-        });
-
-        if (error) throw error;
-
-        addToast('Account created. Check your inbox to verify your email.', 'success', 5000);
-        setAuthMode('login');
+        await signUpWithEmail(email, password);
+        setShowAuthModal(false);
+        setEmail('');
+        setPassword('');
+        addToast('Account created. Verification email sent.', 'success', 5000);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-
+        await signInWithEmail(email, password);
         setShowAuthModal(false);
         setEmail('');
         setPassword('');
         addToast('Welcome back.', 'success');
       }
     } catch (error) {
-      setAuthError(error.message);
+      setAuthError(error.message || 'Authentication failed. Try again.');
+    } finally {
+      setIsAuthSubmitting(false);
     }
   };
 
   const handleGoogleSignIn = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
+    setAuthError('');
+    setIsAuthSubmitting(true);
 
-    if (error) {
-      addToast(error.message, 'error');
+    try {
+      await signInWithGoogle();
+      setShowAuthModal(false);
+      addToast('Signed in with Google.', 'success');
+    } catch (error) {
+      setAuthError(error.message || 'Google sign-in failed. Try again.');
+      addToast(error.message || 'Google sign-in failed. Try again.', 'error');
+    } finally {
+      setIsAuthSubmitting(false);
     }
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setShowMenu(false);
-    addToast('Signed out.', 'info');
+    try {
+      await logout();
+      setShowMenu(false);
+      addToast('Signed out.', 'info');
+    } catch (error) {
+      console.error('Logout error:', error);
+      addToast('Couldn’t sign out. Try again.', 'error');
+    }
   };
 
   const refreshDailyInsight = useCallback(async (forceRefresh = false) => {
@@ -1096,20 +1078,19 @@ export default function FitnessTracker() {
       let newEntries = [];
 
       if (user) {
-        const rowsToInsert = parsedItems.map((item) => ({
-          user_id: user.id,
+        setIsSavingMeal(true);
+        const mealsToInsert = parsedItems.map((item) => ({
           date: selectedDateKey,
-          food_name: item.name,
+          name: item.name,
           calories: item.calories,
           protein: item.protein,
           carbs: item.carbs,
-          fats: item.fats,
+          fat: item.fats,
+          source: 'ai_parsed',
         }));
 
-        const { data, error } = await supabase.from('food_entries').insert(rowsToInsert).select();
-        if (error) throw error;
-
-        newEntries = (data || []).map((entry) => ({
+        const savedMeals = await addMeals(user.id, mealsToInsert);
+        newEntries = (savedMeals || []).map((entry) => ({
           ...mapEntryFromDatabase(entry),
           source: 'ai_parsed',
         }));
@@ -1145,8 +1126,9 @@ export default function FitnessTracker() {
       );
     } catch (error) {
       console.error(error);
-      addToast(`Error: ${error.message}`, 'error');
+      addToast(user ? 'Couldn’t save. Try again.' : `Error: ${error.message}`, 'error');
     } finally {
+      setIsSavingMeal(false);
       setIsProcessing(false);
     }
   };
@@ -1156,8 +1138,7 @@ export default function FitnessTracker() {
 
     try {
       if (user) {
-        const { error } = await supabase.from('food_entries').delete().eq('id', entry.id);
-        if (error) throw error;
+        await deleteMeal(user.id, entry.id);
       }
 
       const willBeEmpty = selectedEntries.length === 1;
@@ -1235,13 +1216,7 @@ export default function FitnessTracker() {
       setGoals(nextGoals);
 
       if (user) {
-        await supabase.from('goals').upsert(
-          {
-            user_id: user.id,
-            ...nextGoals,
-          },
-          { onConflict: 'user_id' }
-        );
+        await saveUserGoals(user.id, nextGoals);
       }
 
       addToast(`Goals updated. ${nextGoals.calories} kcal is the new target.`, 'success', 5000);
@@ -1304,19 +1279,18 @@ export default function FitnessTracker() {
 
         for (const chunk of chunks) {
           const rows = chunk.map((item) => ({
-            user_id: user.id,
             date: item.dateKey,
-            food_name: item.entry.name,
+            name: item.entry.name,
             calories: item.entry.calories,
             protein: item.entry.protein,
             carbs: item.entry.carbs,
-            fats: item.entry.fats,
+            fat: item.entry.fats,
+            source: 'imported',
           }));
 
-          const { data, error } = await supabase.from('food_entries').insert(rows).select();
-          if (error) throw error;
+          const savedMeals = await addMeals(user.id, rows);
 
-          (data || []).forEach((row) => {
+          (savedMeals || []).forEach((row) => {
             if (!importedGroups[row.date]) importedGroups[row.date] = [];
             importedGroups[row.date].push({
               ...mapEntryFromDatabase(row),
@@ -1464,24 +1438,17 @@ export default function FitnessTracker() {
       skipNextGoalsSaveRef.current = true;
 
       if (user) {
-        const [entriesResult, goalsResult, profileResult] = await Promise.all([
-          supabase.from('food_entries').delete().eq('user_id', user.id),
-          supabase.from('goals').delete().eq('user_id', user.id),
-          supabase
-            .from('profiles')
-            .update({
-              height: '',
-              weight: '',
-              goal: '',
-              workout_frequency: '',
-              additional_info: '',
-            })
-            .eq('id', user.id),
+        await Promise.all([
+          deleteAllMeals(user.id),
+          resetUserSettings(
+            user.id,
+            {
+              ...DEFAULT_PROFILE,
+              username: user.user_metadata?.username || user.email?.split('@')[0] || '',
+            },
+            DEFAULT_GOALS
+          ),
         ]);
-
-        if (entriesResult.error) throw entriesResult.error;
-        if (goalsResult.error) throw goalsResult.error;
-        if (profileResult.error) throw profileResult.error;
 
         removeStoredKey(getUserDayRegistryKey(user.id));
         removeStoredKey(getUserInsightsKey(user.id));
@@ -1578,6 +1545,7 @@ export default function FitnessTracker() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   onKeyDown={(event) => event.key === 'Enter' && handleAuth()}
+                  disabled={isAuthSubmitting}
                   placeholder="you@example.com"
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400"
                 />
@@ -1587,6 +1555,7 @@ export default function FitnessTracker() {
                 <input
                   type="password"
                   value={password}
+                  disabled={isAuthSubmitting}
                   onChange={(event) => setPassword(event.target.value)}
                   onKeyDown={(event) => event.key === 'Enter' && handleAuth()}
                   placeholder="••••••••"
@@ -1603,9 +1572,17 @@ export default function FitnessTracker() {
 
             <button
               onClick={handleAuth}
-              className="mb-4 w-full rounded-xl bg-emerald-500 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
+              disabled={isAuthSubmitting}
+              className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400"
             >
-              {authMode === 'login' ? 'Log in' : 'Create account'}
+              {isAuthSubmitting ? (
+                <>
+                  <Loader size={16} className="animate-spin" />
+                  {authMode === 'login' ? 'Signing in...' : 'Creating account...'}
+                </>
+              ) : (
+                authMode === 'login' ? 'Log in' : 'Create account'
+              )}
             </button>
 
             <div className="mb-4 flex items-center gap-3">
@@ -1616,7 +1593,8 @@ export default function FitnessTracker() {
 
             <button
               onClick={handleGoogleSignIn}
-              className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              disabled={isAuthSubmitting}
+              className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400"
             >
               <svg width="16" height="16" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -1624,7 +1602,7 @@ export default function FitnessTracker() {
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
               </svg>
-              Continue with Google
+              {isAuthSubmitting ? 'Opening Google...' : 'Continue with Google'}
             </button>
           </div>
         </div>
@@ -1850,7 +1828,7 @@ export default function FitnessTracker() {
                 {isProcessing ? (
                   <>
                     <Loader className="animate-spin" size={16} />
-                    Estimating nutrition...
+                    {isSavingMeal ? 'Saving meal...' : 'Estimating nutrition...'}
                   </>
                 ) : (
                   <>
@@ -1906,7 +1884,7 @@ export default function FitnessTracker() {
                     <History size={20} />
                   </div>
                   <p className="text-base font-semibold text-slate-700">
-                    {hasTrackedDay ? 'No foods are left on this day.' : 'Nothing is logged yet.'}
+                    {hasTrackedDay ? 'No foods are left on this day.' : 'No meals logged yet. Add your first meal.'}
                   </p>
                   <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
                     {hasTrackedDay

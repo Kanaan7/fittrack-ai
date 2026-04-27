@@ -16,12 +16,12 @@ function sortEntries(entries) {
 export function mapEntryFromDatabase(entry) {
   return {
     id: entry.id,
-    name: entry.food_name,
+    name: entry.food_name || entry.name,
     calories: safeNumber(entry.calories),
     protein: safeNumber(entry.protein),
     carbs: safeNumber(entry.carbs),
-    fats: safeNumber(entry.fats),
-    timestamp: entry.created_at || new Date().toISOString(),
+    fats: safeNumber(entry.fats ?? entry.fat),
+    timestamp: entry.created_at || entry.createdAt || new Date().toISOString(),
     source: entry.source || null,
   };
 }
