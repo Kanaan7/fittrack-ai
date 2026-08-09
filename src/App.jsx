@@ -251,11 +251,13 @@ function MacroBar({ label, icon: Icon, current, goal, unit, color, bgColor }) {
   const isOver = current > safeGoal;
 
   return (
-    <div className="mb-4">
-      <div className="mb-1.5 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Icon size={14} className={color} />
-          <span className="text-sm font-medium text-slate-600">{label}</span>
+    <div className="mb-5 last:mb-0">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-50">
+            <Icon size={14} className={color} />
+          </span>
+          <span className="text-sm font-semibold text-slate-600">{label}</span>
         </div>
         <span className={`text-sm font-semibold tabular-nums ${isOver ? 'text-red-500' : 'text-slate-700'}`}>
           {current.toFixed(0)}
@@ -265,9 +267,9 @@ function MacroBar({ label, icon: Icon, current, goal, unit, color, bgColor }) {
           </span>
         </span>
       </div>
-      <div className="h-2 w-full rounded-full bg-slate-100">
+      <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100/90">
         <div
-          className={`h-2 rounded-full transition-all duration-500 ${isOver ? 'bg-red-400' : bgColor}`}
+          className={`h-2.5 rounded-full shadow-sm transition-all duration-500 ${isOver ? 'bg-red-400' : bgColor}`}
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -280,10 +282,10 @@ function DailyInsightCard({ insight, status, hasEntries, onRefresh }) {
   const isFallback = status === 'error';
 
   return (
-    <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+    <div className="surface-card rounded-[1.75rem] bg-white p-5 sm:p-6">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 text-white shadow-lg shadow-slate-200">
             <Brain size={18} />
           </div>
           <div>
@@ -1495,7 +1497,7 @@ export default function FitnessTracker() {
   const isMutationLocked = Boolean(user && isHydratingUserData);
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
+    <div className="app-shell min-h-screen pb-28">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
       <ResetDataModal
         open={showResetModal}
@@ -1608,15 +1610,15 @@ export default function FitnessTracker() {
         </div>
       )}
 
-      <div className="sticky top-0 z-40 border-b border-slate-100 bg-white/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-4">
+      <div className="app-header sticky top-0 z-40 border-b">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-4 sm:px-7">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500">
-              <Flame size={15} className="text-white" />
+            <div className="brand-mark flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600">
+              <Flame size={18} className="text-white" />
             </div>
             <div>
-              <div className="text-lg font-bold text-slate-800">FitTrack AI</div>
-              <div className="text-xs text-slate-400">Nutrition tracking with smarter daily feedback</div>
+              <div className="text-lg font-extrabold tracking-tight text-slate-900">FitTrack <span className="text-emerald-600">AI</span></div>
+              <div className="hidden text-xs font-medium text-slate-400 sm:block">Daily nutrition, made clear</div>
             </div>
           </div>
 
@@ -1624,7 +1626,7 @@ export default function FitnessTracker() {
             {!user && (
               <button
                 onClick={() => setShowAuthModal(true)}
-                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
+                className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-800"
               >
                 Sign in
               </button>
@@ -1676,12 +1678,12 @@ export default function FitnessTracker() {
       </div>
 
       {!user && (
-        <div className="mx-auto max-w-3xl px-5 pt-4">
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-            <p className="text-sm text-amber-700">
+        <div className="mx-auto max-w-4xl px-5 pt-5 sm:px-7">
+          <div className="flex items-center justify-between gap-4 rounded-2xl border border-emerald-100 bg-white/75 px-4 py-3 shadow-sm backdrop-blur-sm">
+            <p className="text-sm font-medium text-slate-600">
               Guest mode is saved on this device only. Sign in to sync history, imports, and insights.
             </p>
-            <button onClick={() => setShowAuthModal(true)} className="text-sm font-semibold text-amber-700 underline">
+            <button onClick={() => setShowAuthModal(true)} className="whitespace-nowrap text-sm font-bold text-emerald-700 hover:text-emerald-800">
               Save it
             </button>
           </div>
@@ -1689,7 +1691,7 @@ export default function FitnessTracker() {
       )}
 
       {isAccountSyncing && (
-        <div className="mx-auto max-w-3xl px-5 pt-4">
+        <div className="mx-auto max-w-4xl px-5 pt-4 sm:px-7">
           <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-white px-4 py-3 shadow-sm">
             <Loader size={16} className="animate-spin text-emerald-500" />
             <div>
@@ -1704,44 +1706,48 @@ export default function FitnessTracker() {
         </div>
       )}
 
-      <div className="mx-auto max-w-3xl space-y-4 px-5 pt-5">
+      <main className="mx-auto max-w-4xl space-y-5 px-5 pt-7 sm:px-7 sm:pt-9">
         {activeTab === 'home' && (
           showHomeStartupShell ? (
             <HomeStartupShell />
           ) : (
           <>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-end justify-between gap-3 px-1">
               <div>
-                <h2 className="text-2xl font-bold text-slate-800">{selectedDateLabel}</h2>
-                <p className="text-sm text-slate-400">{selectedDateFullLabel}</p>
+                <p className="mb-1 text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">Nutrition overview</p>
+                <h2 className="text-3xl font-extrabold tracking-tight text-slate-900">{selectedDateLabel}</h2>
+                <p className="mt-1 text-sm font-medium text-slate-400">{selectedDateFullLabel}</p>
               </div>
 
               <div className="flex gap-1.5">
                 <button
                   onClick={() => setCurrentDate((previous) => new Date(previous.getFullYear(), previous.getMonth(), previous.getDate() - 1))}
-                  className="rounded-xl border border-slate-200 p-2 transition-colors hover:bg-white"
+                  aria-label="Previous day"
+                  className="rounded-xl border border-white bg-white/70 p-2.5 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-white"
                 >
                   <ChevronLeft size={18} className="text-slate-500" />
                 </button>
                 <button
                   onClick={() => setCurrentDate(new Date())}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 transition-colors hover:bg-white"
+                  className="rounded-xl border border-white bg-white/70 px-3 py-2.5 text-xs font-bold text-slate-600 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-white"
                 >
                   Today
                 </button>
                 <button
                   onClick={() => setCurrentDate((previous) => new Date(previous.getFullYear(), previous.getMonth(), previous.getDate() + 1))}
-                  className="rounded-xl border border-slate-200 p-2 transition-colors hover:bg-white"
+                  aria-label="Next day"
+                  className="rounded-xl border border-white bg-white/70 p-2.5 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-white"
                 >
                   <ChevronRight size={18} className="text-slate-500" />
                 </button>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center gap-6">
-                <div className="relative h-20 w-20 flex-shrink-0">
-                  <svg className="h-20 w-20 -rotate-90" viewBox="0 0 80 80">
+            <div className="nutrition-card surface-card rounded-[1.75rem] p-5 sm:p-7">
+              <div className="relative z-10 mb-7 flex items-center justify-between gap-5">
+                <div className="flex items-center gap-5">
+                <div className="relative h-24 w-24 flex-shrink-0">
+                  <svg className="h-24 w-24 -rotate-90" viewBox="0 0 80 80" aria-hidden="true">
                     <circle cx="40" cy="40" r="30" fill="none" stroke="#f1f5f9" strokeWidth="8" />
                     <circle
                       cx="40"
@@ -1757,17 +1763,21 @@ export default function FitnessTracker() {
                     />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-xs font-bold leading-none text-slate-700">{Number.isFinite(progressPercentage) ? progressPercentage : 0}%</span>
+                    <span className="text-sm font-extrabold leading-none text-slate-800">{Number.isFinite(progressPercentage) ? progressPercentage : 0}%</span>
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-3xl font-bold tabular-nums text-slate-800">{totals.calories.toFixed(0)}</div>
-                  <div className="text-sm text-slate-400">of {goals.calories} kcal</div>
-                  <div className="mt-0.5 text-xs font-medium text-emerald-600">{remainingCalories.toFixed(0)} remaining</div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Calories</div>
+                  <div className="mt-1 text-4xl font-extrabold tabular-nums tracking-tight text-slate-900">{totals.calories.toFixed(0)}</div>
+                  <div className="text-sm font-medium text-slate-400">of {goals.calories} kcal</div>
+                  <div className="mt-2 inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-700">{remainingCalories.toFixed(0)} remaining</div>
                 </div>
+                </div>
+                <Target className="hidden text-emerald-200 sm:block" size={54} strokeWidth={1.4} />
               </div>
 
+              <div className="relative z-10 rounded-2xl border border-slate-100/80 bg-white/70 p-4 backdrop-blur-sm">
               <MacroBar
                 label="Protein"
                 icon={Beef}
@@ -1795,6 +1805,7 @@ export default function FitnessTracker() {
                 color="text-amber-400"
                 bgColor="bg-amber-400"
               />
+              </div>
             </div>
 
             <DailyInsightCard
@@ -1804,10 +1815,13 @@ export default function FitnessTracker() {
               onRefresh={() => refreshDailyInsight(true)}
             />
 
-            <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+            <div className="surface-card rounded-[1.75rem] bg-white p-5 sm:p-6">
               <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-base font-semibold text-slate-700">Log food</h3>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">Natural language enabled</span>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Log a meal</h3>
+                  <p className="text-sm text-slate-400">Describe it naturally—we’ll estimate the macros.</p>
+                </div>
+                <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 sm:block">AI assisted</span>
               </div>
 
               <textarea
@@ -1817,13 +1831,13 @@ export default function FitnessTracker() {
                 disabled={isProcessing || isMutationLocked}
                 rows={2}
                 placeholder="Try: grilled chicken sandwich, 2 eggs with toast, large coffee with oat milk..."
-                className="mb-3 w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700 transition-all placeholder:text-slate-300 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                className="mb-3 w-full resize-none rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3.5 text-sm text-slate-700 transition-all placeholder:text-slate-400 focus:border-emerald-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-100"
               />
 
               <button
                 onClick={processInput}
                 disabled={isProcessing || isMutationLocked || !inputText.trim()}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-3 text-sm font-semibold text-white transition-all hover:bg-emerald-600 disabled:bg-slate-200 disabled:text-slate-400"
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-100 transition-all hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:bg-slate-200 disabled:from-slate-200 disabled:to-slate-200 disabled:text-slate-400 disabled:shadow-none"
               >
                 {isProcessing ? (
                   <>
@@ -1870,7 +1884,7 @@ export default function FitnessTracker() {
               )}
             </div>
 
-            <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+            <div className="surface-card rounded-[1.75rem] bg-white p-5 sm:p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-base font-semibold text-slate-700">Food log</h3>
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
@@ -2331,9 +2345,9 @@ export default function FitnessTracker() {
             </div>
           </div>
         )}
-      </div>
+      </main>
 
-      <div className="safe-area-pb fixed bottom-0 left-0 right-0 border-t border-slate-100 bg-white/90 backdrop-blur-sm">
+      <div className="bottom-dock safe-area-pb fixed bottom-0 left-0 right-0 z-40 border-t border-slate-100">
         <div className="mx-auto flex max-w-3xl">
           {[
             { tab: 'home', icon: Home, label: 'Today' },
@@ -2344,10 +2358,11 @@ export default function FitnessTracker() {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`flex flex-1 flex-col items-center gap-1 py-3.5 transition-colors ${
-                activeTab === tab ? 'text-emerald-500' : 'text-slate-400 hover:text-slate-600'
+              className={`relative flex flex-1 flex-col items-center gap-1 py-3.5 transition-colors ${
+                activeTab === tab ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
               }`}
             >
+              {activeTab === tab && <span className="absolute top-1.5 h-1 w-5 rounded-full bg-emerald-500" />}
               <Icon size={22} strokeWidth={activeTab === tab ? 2.5 : 1.8} />
               <span className="text-xs font-medium">{label}</span>
             </button>

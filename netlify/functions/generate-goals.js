@@ -1,21 +1,20 @@
-exports.handler = async (event, context) => {
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
+import { ANTHROPIC_MODEL } from './_shared/anthropic.js';
+
+export default async (request) => {
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
 
   try {
-    const { height, weight, goal, workoutFrequency, historicalData } = JSON.parse(event.body);
+    const apiKey = Netlify.env.get('ANTHROPIC_API_KEY');
+    if (!apiKey) {
+      return Response.json({ error: 'Missing Anthropic API key' }, { status: 500 });
+    }
+
+    const { height, weight, goal, workoutFrequency, historicalData } = await request.json();
 
     if (!height || !weight || !goal) {
-      return {
-        statusCode: 400,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'height, weight, and goal are required' })
-      };
+      return Response.json({ error: 'Height, weight, and goal are required' }, { status: 400 });
     }
 
     const historyContext = historicalData
@@ -26,11 +25,11 @@ exports.handler = async (event, context) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: ANTHROPIC_MODEL,
         max_tokens: 1000,
         messages: [{
           role: "user",
@@ -64,18 +63,13 @@ Return ONLY a raw JSON object with no markdown:
     const cleaned = content.replace(/```json|```/g, "").trim();
     const result = JSON.parse(cleaned);
 
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(result)
-    };
+    return Response.json(result);
 
   } catch (error) {
     console.error('generate-goals error:', error);
-    return {
-      statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: error.message })
-    };
+    return Response.json(
+      { error: error.message || 'Failed to generate goals' },
+      { status: 500 }
+    );
   }
 };

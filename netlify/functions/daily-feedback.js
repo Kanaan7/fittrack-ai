@@ -1,3 +1,5 @@
+import { ANTHROPIC_MODEL } from './_shared/anthropic.js';
+
 export default async (request) => {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 });
@@ -25,7 +27,7 @@ export default async (request) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: ANTHROPIC_MODEL,
         max_tokens: 500,
         messages: [
           {

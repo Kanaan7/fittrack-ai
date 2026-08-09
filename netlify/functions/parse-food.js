@@ -1,32 +1,31 @@
-exports.handler = async (event, context) => {
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
+import { ANTHROPIC_MODEL } from './_shared/anthropic.js';
+
+export default async (request) => {
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 });
   }
 
   try {
-    const { text } = JSON.parse(event.body);
+    const apiKey = Netlify.env.get('ANTHROPIC_API_KEY');
+    if (!apiKey) {
+      return Response.json({ error: 'Missing Anthropic API key' }, { status: 500 });
+    }
+
+    const { text } = await request.json();
 
     if (!text?.trim()) {
-      return {
-        statusCode: 400,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'No food text provided' })
-      };
+      return Response.json({ error: 'No food text provided' }, { status: 400 });
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: ANTHROPIC_MODEL,
         max_tokens: 1000,
         messages: [{
           role: "user",
@@ -62,21 +61,13 @@ Food to parse: "${text}"`
       throw new Error('No items could be parsed from that description');
     }
 
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: parsedItems })
-    };
+    return Response.json({ items: parsedItems });
 
   } catch (error) {
     console.error('parse-food error:', error);
-    return {
-      statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        error: error.message,
-        details: 'Check Netlify function logs for more info'
-      })
-    };
+    return Response.json(
+      { error: error.message || 'Failed to parse food' },
+      { status: 500 }
+    );
   }
 };

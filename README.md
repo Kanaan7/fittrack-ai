@@ -1,68 +1,50 @@
-# fittrack-ai
+# FitTrack AI
 
-FitTrack AI is a web app built with Vite and a Netlify serverless backend. The frontend lives in `src/`, and backend endpoints live in `netlify/functions/` for handling API-style requests (for example, AI-powered features) without exposing secrets in the browser. :contentReference[oaicite:0]{index=0}
+FitTrack AI is a responsive nutrition tracker built with React, Vite, Firebase, and Netlify Functions. It supports guest tracking, account sync, CSV imports, meal history, macro goals, and AI-assisted nutrition feedback.
 
-## What’s in this repo
+## Requirements
 
-From the repository structure: :contentReference[oaicite:1]{index=1}
+- Node.js 22 or newer
+- npm
+- A Firebase project with Email/Password and Google authentication enabled
+- An Anthropic API key for AI features
 
-- `src/`  
-  Frontend application code (Vite project).
+## Local setup
 
-- `netlify/functions/`  
-  Netlify Functions (serverless endpoints). Use these for anything that needs secrets (API keys) or server-side logic.
+1. Install dependencies:
 
-- `index.html`  
-  Vite entry HTML.
+   ```bash
+   npm install
+   ```
 
-- `vite.config.js`  
-  Vite configuration.
+2. Copy `.env.example` to `.env` and fill in the values:
 
-- `tailwind.config.js` and `postcss.config.js`  
-  Tailwind CSS and PostCSS configuration.
+   ```env
+   VITE_FIREBASE_API_KEY=
+   VITE_FIREBASE_AUTH_DOMAIN=
+   VITE_FIREBASE_PROJECT_ID=
+   VITE_FIREBASE_STORAGE_BUCKET=
+   VITE_FIREBASE_MESSAGING_SENDER_ID=
+   VITE_FIREBASE_APP_ID=
+   ANTHROPIC_API_KEY=
+   ```
 
-- `netlify.toml`  
-  Netlify build and functions configuration.
+3. Start the complete local app:
 
-## Tech stack
+   ```bash
+   npm run dev
+   ```
 
-- Vite (frontend tooling)
-- JavaScript (primary language in this repo) :contentReference[oaicite:2]{index=2}
-- Tailwind CSS (styling) :contentReference[oaicite:3]{index=3}
-- Firebase Auth and Firestore Standard edition for user accounts and meal history
-- Netlify Functions (serverless backend) :contentReference[oaicite:4]{index=4}
+   Open the local URL printed by Vite. Netlify's Vite integration serves the function routes alongside the frontend, so AI features work from the same development server.
 
-## Firebase setup
-
-Create these frontend environment variables locally and in Netlify:
+## Validation
 
 ```bash
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
+npm run check
 ```
 
-Keep AI provider keys server-side only:
+## Deployment
 
-```bash
-ANTHROPIC_API_KEY=
-```
+The repository includes `netlify.toml`, so Netlify can build with `npm run build` and publish the `dist` directory. Add every environment variable above to the Netlify project before deploying. Keep `ANTHROPIC_API_KEY` server-side and never prefix it with `VITE_`.
 
-Firestore stores app data at `users/{userId}` and `users/{userId}/meals/{mealId}`. Publish the rules in `firestore.rules` from the Firebase Console or Firebase CLI so users can only read and write their own records.
-
-## Getting started
-
-### Prerequisites
-
-- Node.js (recommended: current LTS)
-- npm (or your preferred package manager)
-
-### Install
-
-```bash
-git clone https://github.com/Kanaan7/fittrack-ai.git
-cd fittrack-ai
-npm install
+Firestore data is stored under `users/{userId}` and `users/{userId}/meals/{mealId}`. Publish `firestore.rules` through Firebase so users can access only their own records.
